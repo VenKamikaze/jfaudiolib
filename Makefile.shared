@@ -8,6 +8,7 @@ JFAUDIOLIB_USE_SDLMIXER=0
 JFAUDIOLIB=libjfaudiolib.a
 JFAUDIOLIB_DIR:=$(dir $(lastword $(MAKEFILE_LIST)))
 JFAUDIOLIB_LDFLAGS=
+JFAUDIOLIB_SDLCFLAGS=$(shell $(SDL2CONFIG) --cflags)
 
 SDL2CONFIG?=$(shell which sdl2-config || which false)
 PKGCONFIG?=$(shell which pkg-config || which false)
@@ -15,7 +16,16 @@ PKGCONFIG?=$(shell which pkg-config || which false)
 TARGETMACHINE?=$(strip $(shell $(CC) -dumpmachine))
 export TARGETMACHINE
 
-ifeq (mingw32,$(findstring mingw32,$(TARGETMACHINE)))
+ifeq (-emscripten,$(findstring -emscripten,$(TARGETMACHINE)))
+ # Browser build: SDL2 from the Emscripten port, no ALSA, FluidSynth or Vorbis.
+ # Objects and the library get their own names so that a native build can live
+ # in the same tree.
+ JFAUDIOLIB_HAVE_SDL=2
+ JFAUDIOLIB_SDLCFLAGS=-sUSE_SDL=2
+ JFAUDIOLIB_LDFLAGS+= -sUSE_SDL=2
+ o=wasm.o
+ JFAUDIOLIB=libjfaudiolib.wasm.a
+else ifeq (mingw32,$(findstring mingw32,$(TARGETMACHINE)))
  JFAUDIOLIB_HAVE_XAUDIO2=1
  JFAUDIOLIB_LDFLAGS+= -lwinmm -ldxguid -lole32
  JFAUDIOLIB_HAVE_VORBIS=1

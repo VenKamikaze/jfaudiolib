@@ -221,7 +221,14 @@ int SDLDrv_PCM_Init(int * mixrate, int * numchannels, int * samplebits, void * i
 
     memset(&actual, 0, sizeof(actual));
 
+#ifdef __EMSCRIPTEN__
+    // SDL's Web Audio device is always 32-bit float. Without an "obtained" spec SDL
+    // converts our samples to whatever the browser wants, so the format stays as asked.
+    err = SDL_OpenAudio(&spec, NULL);
+    actual = spec;
+#else
     err = SDL_OpenAudio(&spec, &actual);
+#endif
     if (err < 0) {
         ErrorCode = SDLErr_OpenAudio;
         return SDLErr_Error;

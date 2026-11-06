@@ -38,7 +38,7 @@ else
   JFAUDIOLIB_LDFLAGS+= -framework Foundation
  endif
  ifneq (0,$(JFAUDIOLIB_HAVE_SDL))
-  JFAUDIOLIB_CPPFLAGS+= -DHAVE_SDL=2 $(shell $(SDL2CONFIG) --cflags)
+  JFAUDIOLIB_CPPFLAGS+= -DHAVE_SDL=2 $(JFAUDIOLIB_SDLCFLAGS)
   ifeq (1,$(JFAUDIOLIB_USE_SDLMIXER))
    JFAUDIOLIB_CPPFLAGS+= -DUSE_SDLMIXER
    SOURCES+= src/driver_sdlmixer.c
@@ -59,7 +59,7 @@ else
  endif
 endif
 
-OBJECTS=$(SOURCES:%.c=%.o)
+OBJECTS=$(SOURCES:%.c=%.$(o))
 
 .PHONY: all
 all: $(JFAUDIOLIB) test
@@ -69,12 +69,12 @@ include Makefile.deps
 $(JFAUDIOLIB): $(OBJECTS)
 	$(AR) cr $@ $^
 
-%.o: %.c
+%.$(o): %.c
 	$(CC) -c $(JFAUDIOLIB_CPPFLAGS) $(CPPFLAGS) $(CFLAGS) $(JFAUDIOLIB_CFLAGS) $< -o $@
 
-test: src/test.o $(JFAUDIOLIB);
+test: src/test.$(o) $(JFAUDIOLIB);
 	$(CC) $(JFAUDIOLIB_CPPFLAGS) $(CPPFLAGS) $(CFLAGS) $^ -o $@ $(LDFLAGS) $(JFAUDIOLIB_LDFLAGS) -lm
 
 .PHONY: clean
 clean:
-	-rm -f $(OBJECTS) $(JFAUDIOLIB) src/test.o test
+	-rm -f $(OBJECTS) $(JFAUDIOLIB) src/test.$(o) test
