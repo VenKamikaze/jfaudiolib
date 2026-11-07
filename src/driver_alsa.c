@@ -61,6 +61,27 @@ static int threadRunning = 0;
 static volatile int threadQuit = 0;
 static void (* threadService)(void) = 0;
 
+// The sequencer handle is used by the playback thread (the MIDI service
+// routine's note events, tempo changes) and by the main thread (volume,
+// notes off, tempo, start and stop), and ALSA sequencer handles are not
+// thread-safe. seqMutex serialises them: the thread holds it while it runs
+// the service routine, and the MIDI layer takes it through
+// ALSADrv_MIDI_Lock() around its own calls. It is recursive because both
+// sides re-enter (MIDI_Reset locks and calls MIDI_AllNotesOff, which locks;
+// the service routine changes the tempo).
+static pthread_mutex_t seqMutex;
+static pthread_once_t seqMutexOnce = PTHREAD_ONCE_INIT;
+
+static void initSeqMutex(void)
+{
+    pthread_mutexattr_t attr;
+
+    pthread_mutexattr_init(&attr);
+    pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
+    pthread_mutex_init(&seqMutex, &attr);
+    pthread_mutexattr_destroy(&attr);
+}
+
 static unsigned int threadTimer = 0;
 static unsigned int threadQueueTimer = 0;
 static int threadQueueTicks = 0;
@@ -241,6 +262,7 @@ static void * threadProc(void * parm)
     (void)parm;
 
     // prime the pump
+    ALSADrv_MIDI_Lock();
     threadTimer = get_tick();
     threadQueueTimer = threadTimer + threadQueueTicks;
     while (threadTimer < threadQueueTimer) {
@@ -249,6 +271,7 @@ static void * threadProc(void * parm)
         }
         threadTimer++;
     }
+    ALSADrv_MIDI_Unlock();
     
     while (!threadQuit) {
         tv.tv_sec = 0;
@@ -266,6 +289,7 @@ static void * threadProc(void * parm)
             continue;
         }
 
+        ALSADrv_MIDI_Lock();
         threadQueueTimer = sequenceTime + threadQueueTicks;
         while (threadTimer < threadQueueTimer) {
             if (threadService) {
@@ -273,6 +297,7 @@ static void * threadProc(void * parm)
             }
             threadTimer++;
         }
+        ALSADrv_MIDI_Unlock();
     }
 
     return NULL;
@@ -360,7 +385,9 @@ int ALSADrv_MIDI_StartPlayback(void (*service)(void))
     threadService = service;
     threadQuit = 0;
 
+    ALSADrv_MIDI_Lock();
     ALSADrv_MIDI_QueueStart();
+    ALSADrv_MIDI_Unlock();
 
     if (pthread_create(&thread, NULL, threadProc, NULL)) {
         ASS_Message("ALSADrv: pthread_create returned error\n");
@@ -385,11 +412,15 @@ void ALSADrv_MIDI_HaltPlayback(void)
 
     threadQuit = 1;
 
+    // Not called with the lock held: the thread may be waiting for it to
+    // finish its current batch.
     if (pthread_join(thread, &ret)) {
         ASS_Message("ALSADrv: pthread_join returned error\n");
     }
 
+    ALSADrv_MIDI_Lock();
     ALSADrv_MIDI_QueueStop();
+    ALSADrv_MIDI_Unlock();
 
     threadRunning = 0;
 }
@@ -399,6 +430,7 @@ void ALSADrv_MIDI_SetTempo(int tempo, int division)
     double tps;
     snd_seq_queue_tempo_t * t;
 
+    ALSADrv_MIDI_Lock();    // also called from the playback thread
     ALSADrv_MIDI_QueueStop();
 
     snd_seq_queue_tempo_alloca(&t);
@@ -410,14 +442,18 @@ void ALSADrv_MIDI_SetTempo(int tempo, int division)
     threadQueueTicks = (int) ceil(tps / (double) THREAD_QUEUE_INTERVAL);
 
     ALSADrv_MIDI_QueueStart();
+    ALSADrv_MIDI_Unlock();
 }
 
 void ALSADrv_MIDI_Lock(void)
 {
+    pthread_once(&seqMutexOnce, initSeqMutex);
+    pthread_mutex_lock(&seqMutex);
 }
 
 void ALSADrv_MIDI_Unlock(void)
 {
+    pthread_mutex_unlock(&seqMutex);
 }
 
 void ALSADrv_MIDI_QueueStart(void)
